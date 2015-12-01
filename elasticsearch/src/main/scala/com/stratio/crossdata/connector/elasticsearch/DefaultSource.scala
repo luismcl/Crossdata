@@ -20,14 +20,14 @@ Modifications and adaptations - Copyright (C) 2015 Stratio (http://stratio.com)
 */
 package com.stratio.crossdata.connector.elasticsearch
 
-import com.stratio.crossdata.connector.TableInventory
+import com.stratio.crossdata.connector.FunctionInventory.UDF
+import com.stratio.crossdata.connector.{FunctionInventory, TableInventory}
 import com.stratio.crossdata.connector.TableInventory.Table
 import org.apache.spark.sql.{DataFrame, SaveMode, SQLContext}
 import org.apache.spark.sql.sources._
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{DataTypes, StructField, StringType, StructType, DoubleType}
 import org.elasticsearch.hadoop.cfg.ConfigurationOptions._
 import org.elasticsearch.hadoop.{EsHadoopIllegalArgumentException, EsHadoopIllegalStateException}
-import org.elasticsearch.hadoop.cfg.ConfigurationOptions
 import org.elasticsearch.spark.sql.ElasticSearchXDRelation
 import org.apache.spark.sql.SaveMode.Append
 import org.apache.spark.sql.SaveMode.ErrorIfExists
@@ -46,7 +46,7 @@ object DefaultSource{
 /**
  * This class is used by Spark to create a new  [[ElasticSearchXDRelation]]
  */
-class DefaultSource extends RelationProvider with SchemaRelationProvider with CreatableRelationProvider with TableInventory with DataSourceRegister {
+class DefaultSource extends RelationProvider with SchemaRelationProvider with CreatableRelationProvider with TableInventory with FunctionInventory {
 
   import DefaultSource._
 
@@ -115,4 +115,12 @@ class DefaultSource extends RelationProvider with SchemaRelationProvider with Cr
     ElasticSearchConnectionUtils.listTypes(params(options))
   }
 
+  //Get builtin functions manifest
+  override def nativeBuiltinFunctions: Seq[UDF] = {
+    //TODO: Complete the built-in function inventory
+    Seq(
+      UDF("fuzzy", None, StructType(Seq(StructField("value", StringType, false), StructField("fuzziness", DoubleType, false))), DataTypes.StringType)
+    )
+
+  }
 }

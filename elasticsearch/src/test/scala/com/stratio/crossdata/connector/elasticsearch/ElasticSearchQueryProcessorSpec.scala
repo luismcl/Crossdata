@@ -44,7 +44,7 @@ class ElasticSearchQueryProcessorSpec extends BaseXDTest with MockitoSugar {
     val query = new SearchDefinition(indexType)
 
     //Experimentation
-    val result = queryProcessor.buildNativeQuery(requiredColums, filters, query)
+    val result = queryProcessor.buildNativeQuery(requiredColums, filters, query, null)
 
     //Expectations
     result should not be null
@@ -67,7 +67,7 @@ class ElasticSearchQueryProcessorSpec extends BaseXDTest with MockitoSugar {
     val query = new SearchDefinition(indexType)
 
     //Experimentation
-    val result = queryProcessor.buildNativeQuery(requiredColums, filters, query)
+    val result = queryProcessor.buildNativeQuery(requiredColums, filters, query, null)
 
     //Expectations
     result should not be null
@@ -90,7 +90,7 @@ class ElasticSearchQueryProcessorSpec extends BaseXDTest with MockitoSugar {
     val query = new SearchDefinition(indexType)
 
     //Experimentation
-    val result = queryProcessor.buildNativeQuery(requiredColums, filters, query)
+    val result = queryProcessor.buildNativeQuery(requiredColums, filters, query, null)
 
     //Expectations
     result should not be null

@@ -19,14 +19,17 @@ import com.sksamuel.elastic4s.ElasticDsl._
 import com.sksamuel.elastic4s._
 import com.stratio.crossdata.connector.elasticsearch.ElasticSearchConnectionUtils._
 import org.apache.spark.Logging
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Literal}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, Attribute, Literal}
 import org.apache.spark.sql.catalyst.planning.PhysicalOperation
 import org.apache.spark.sql.catalyst.plans.logical.{Limit, LogicalPlan}
+import org.apache.spark.sql.crossdata.catalyst.planning.ExtendedPhysicalOperation
+import org.apache.spark.sql.crossdata.execution.NativeUDF
 import org.apache.spark.sql.sources.CatalystToCrossdataAdapter.{BaseLogicalPlan, FilterReport, SimpleLogicalPlan}
 import org.apache.spark.sql.sources.{CatalystToCrossdataAdapter, Filter => SourceFilter}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.{Row, sources}
 import org.elasticsearch.action.search.SearchResponse
+import org.elasticsearch.common.unit.Fuzziness
 
 object ElasticSearchQueryProcessor {
 
@@ -59,7 +62,7 @@ class ElasticSearchQueryProcessor(val logicalPlan: LogicalPlan, val parameters: 
 
       val (esIndex, esType) = extractIndexAndType(parameters).get
 
-      val finalQuery = buildNativeQuery(requiredColumns, filters, search in esIndex / esType)
+      val finalQuery = buildNativeQuery(requiredColumns, filters, search in esIndex / esType, baseLogicalPlan.udfsMap)
       val resp: SearchResponse = buildClient(parameters).execute(finalQuery).await
 
       ElasticSearchRowConverter.asRows(schemaProvided.get, resp.getHits.getHits, requiredColumns)
@@ -67,16 +70,21 @@ class ElasticSearchQueryProcessor(val logicalPlan: LogicalPlan, val parameters: 
   }
 
 
-  def buildNativeQuery(requiredColumns: Seq[Attribute], filters: Array[SourceFilter], query: SearchDefinition): SearchDefinition = {
-    val queryWithFilters = buildFilters(filters, query)
+  def buildNativeQuery(requiredColumns: Seq[Attribute], filters: Array[SourceFilter], query: SearchDefinition, udfs: Map[Attribute, NativeUDF]): SearchDefinition = {
+    val queryWithFilters = buildFilters(filters, query, udfs)
     selectFields(requiredColumns, queryWithFilters)
   }
 
-  private def buildFilters(sFilters: Array[SourceFilter], query: SearchDefinition): SearchDefinition = {
+  private def buildFilters(sFilters: Array[SourceFilter], query: SearchDefinition, udfs: Map[Attribute, NativeUDF]): SearchDefinition = {
 
-    val matchers = sFilters.collect {
+    val matchers:Array[QueryDefinition] = sFilters.collect {
       case sources.StringContains(attribute, value) => termQuery(attribute, value.toLowerCase)
       case sources.StringStartsWith(attribute, value) => prefixQuery(attribute, value.toLowerCase)
+      case sources.EqualTo(attribute, value:AttributeReference) => {
+        value.name {
+          case "fuzzy" => fuzzyQuery(attribute, "").fuzziness(Fuzziness.AUTO)
+        }
+      }
     }
 
     val searchFilters = sFilters.collect {
@@ -118,7 +126,7 @@ class ElasticSearchQueryProcessor(val logicalPlan: LogicalPlan, val parameters: 
         case Limit(_, child) =>
           findProjectsFilters(child)
 
-        case PhysicalOperation(projectList, filterList, _) =>
+        case ExtendedPhysicalOperation(projectList, filterList, _) =>
           CatalystToCrossdataAdapter.getConnectorLogicalPlan(logicalPlan, projectList, filterList) match {
             case (_, FilterReport(filtersIgnored, _)) if filtersIgnored.nonEmpty => None
             case (basePlan, _) => Some(basePlan)
@@ -126,23 +134,30 @@ class ElasticSearchQueryProcessor(val logicalPlan: LogicalPlan, val parameters: 
       }
     }
 
-    findProjectsFilters(logicalPlan).collect{ case bp if checkNativeFilters(bp.filters) => (bp, limit) }
+    findProjectsFilters(logicalPlan).collect{ case bp if checkNativeFilters(bp.filters, bp.udfsMap) => (bp, limit) }
   }
 
-  private[this] def checkNativeFilters(filters: Array[SourceFilter]): Boolean = filters.forall {
-    case _: sources.EqualTo => true
-    case _: sources.In => true
-    case _: sources.LessThan => true
-    case _: sources.GreaterThan => true
-    case _: sources.LessThanOrEqual => true
-    case _: sources.GreaterThanOrEqual => true
-    case _: sources.IsNull => true
-    case _: sources.IsNotNull => true
-    case _: sources.StringStartsWith => true
-    case _: sources.StringContains => true
-    case sources.And(left, right) => checkNativeFilters(Array(left, right))
-    // TODO add more filters (Not?)
-    case _ => false
+  private[this] def checkNativeFilters(filters: Array[SourceFilter],
+                                       udfs: Map[Attribute, NativeUDF]): Boolean = {
 
+    val udfNames = udfs.keys.map(_.toString).toSet
+      //TODO Validate UDFs
+
+    filters.forall {
+      case _: sources.EqualTo => true
+      case _: sources.In => true
+      case _: sources.LessThan => true
+      case _: sources.GreaterThan => true
+      case _: sources.LessThanOrEqual => true
+      case _: sources.GreaterThanOrEqual => true
+      case _: sources.IsNull => true
+      case _: sources.IsNotNull => true
+      case _: sources.StringStartsWith => true
+      case _: sources.StringContains => true
+      case sources.And(left, right) => checkNativeFilters(Array(left, right), udfs)
+      // TODO add more filters (Not?)
+      case _ => false
+
+    }
   }
 }

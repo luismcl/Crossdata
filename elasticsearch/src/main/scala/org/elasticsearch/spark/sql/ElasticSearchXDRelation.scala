@@ -15,12 +15,14 @@
  */
 package org.elasticsearch.spark.sql
 
-import com.stratio.crossdata.connector.NativeScan
+import com.stratio.crossdata.connector.{NativeFunctionExecutor, NativeScan}
 import com.stratio.crossdata.connector.elasticsearch.ElasticSearchQueryProcessor
 import org.apache.spark.Logging
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.crossdata.execution.{EvaluateNativeUDF, NativeUDF}
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.{Row, SQLContext}
+import org.apache.spark.sql.{sources, Row, SQLContext}
 
 
 /**
@@ -32,7 +34,10 @@ import org.apache.spark.sql.{Row, SQLContext}
  * @param userSchema Spark User Defined Schema
  */
 class ElasticSearchXDRelation(parameters: Map[String, String], sqlContext: SQLContext, userSchema: Option[StructType] = None)
-  extends ElasticsearchRelation(parameters, sqlContext, userSchema) with NativeScan with Logging {
+  extends ElasticsearchRelation(parameters, sqlContext, userSchema)
+  with NativeScan
+  with NativeFunctionExecutor
+  with Logging {
 
   /**
    * Build and Execute a NativeScan for the [[LogicalPlan]] provided.
@@ -56,11 +61,15 @@ class ElasticSearchXDRelation(parameters: Map[String, String], sqlContext: SQLCo
   override def isSupported(logicalStep: LogicalPlan, wholeLogicalPlan: LogicalPlan): Boolean = logicalStep match {
     case ln: LeafNode => true // TODO leafNode == LogicalRelation(xdSourceRelation)
     case un: UnaryNode => un match {
-      case Project(_, _) | Filter(_, _)  => true
+      case Project(_, _) | Filter(_, _)| EvaluateNativeUDF(_, _, _)  => true
       case Limit(_, _)=> false //TODO add support to others
       case _ => false
 
     }
     case unsupportedLogicalPlan => false //TODO log.debug(s"LogicalPlan $unsupportedLogicalPlan cannot be executed natively");
+  }
+
+  override def buildScan(requiredColumns: Array[String], filters: Array[sources.Filter], udfs: Map[String, NativeUDF]): RDD[Row] = {
+    null
   }
 }
